@@ -1,7 +1,7 @@
 // dsh-weixin-bot worker: WeChat ClawBot <-> DSH plugin bridge over stdio.
 // Protocol (newline-delimited JSON):
 //   worker -> plugin: {"type":"ready"} | {"type":"log","line":..} | {"type":"chat","id":..,"conversationId":..,"text":..}
-//   plugin -> worker: {"type":"reply","id":..,"text":..} | {"type":"quit"}
+//   plugin -> worker: {"type":"reply","id":..,"text":..} | {"type":"status","conversationId":..,"text":..} | {"type":"quit"}
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -37,6 +37,8 @@ function loadSdk() {
 
 let pendingReplies = new Map();
 let nextId = 1;
+/** Bot instance from sdk.start() — undefined until the monitor is up. */
+let bot;
 
 /** Ask the plugin (native DSH Agent) to handle one chat turn. */
 function requestChat(conversationId, text) {
@@ -63,6 +65,20 @@ function requestChat(conversationId, text) {
     if (msg.type === 'reply') {
       const r = pendingReplies.get(msg.id);
       if (r) { pendingReplies.delete(msg.id); flog('<< reply for ' + msg.id + ': ' + String(msg.text || '').slice(0, 200)); r({ text: msg.text ?? '' }); }
+    } else if (msg.type === 'status') {
+      // Proactive mid-task progress push; sendMessage needs a cached context
+      // token, which exists because a status only follows an inbound message.
+      const text = String(msg.text ?? '').slice(0, 2000);
+      if (!text) return;
+      if (!bot) { flog('status before ready, dropped: ' + text.slice(0, 100)); return; }
+      flog('<< status: ' + text.slice(0, 120));
+      Promise.race([
+        bot.sendMessage(text),
+        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('sendMessage timeout 15s')), 15000); t.unref?.(); }),
+      ]).then(
+        () => flog('status delivered ok'),
+        (e) => flog('status send FAILED: ' + ((e && e.message) || e))
+      );
     } else if (msg.type === 'quit') {
       process.exit(0);
     }
@@ -87,7 +103,7 @@ function requestChat(conversationId, text) {
     async clearSession() {},
   };
 
-  sdk.start(agentAdapter, { log });
+  bot = sdk.start(agentAdapter, { log });
   send({ type: 'ready' });
   flog('ready sent — monitor polling');
 })().catch((e) => {
