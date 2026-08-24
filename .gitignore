@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.wx-worker.log
+.dsh-weixin-bot-worker.js
+worker.b64.txt

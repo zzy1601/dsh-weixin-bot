@@ -1,0 +1,20 @@
+{
+  "name": "dsh-weixin-bot",
+  "version": "0.1.0",
+  "description": "DSH 微信 ClawBot 插件：手机微信发消息驱动本机 DeepSeek Harness 的原生 Agent 完成任务并回复（多轮上下文 / 会话重置）",
+  "main": "lib/index.mjs",
+  "bin": {
+    "dsh-weixin-bot-setup": "scripts/setup.cjs"
+  },
+  "keywords": [
+    "dsh",
+    "wechat",
+    "clawbot",
+    "agent",
+    "remote-control"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "weixin-agent-sdk": "^0.5.0"
+  }
+}
