@@ -61,6 +61,46 @@ function mdToPlain(md) {
 const RECENT_WINDOW_MS = 15 * 1000;
 const recent = [];
 
+/**
+ * Split long text into WeChat-sized chunks. Cuts preferentially at paragraph,
+ * sentence, or clause boundaries inside a lookback window; hard-cuts only as
+ * a last resort (e.g., one unbroken 5000-char line).
+ */
+function splitChunks(text, max) {
+  const s = String(text ?? '');
+  if (s.length <= max) return [s];
+  const chunks = [];
+  let rest = s;
+  while (rest.length > 0) {
+    if (rest.length <= max) { chunks.push(rest); break; }
+    const window = rest.slice(0, max + 300);
+    let cut = -1;
+    for (const needle of ['\n\n', '\n', '。', '！', '？', '；', '，', ', ', '. ']) {
+      const idx = window.lastIndexOf(needle);
+      if (idx > max * 0.4) { cut = idx + needle.length; break; }
+    }
+    if (cut < 0) cut = max;
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  return chunks;
+}
+
+/** Send chunks sequentially with markers; resolves after the last accept. */
+async function sendChunked(chunks) {
+  const total = chunks.length;
+  for (let i = 0; i < total; i++) {
+    const label = total > 1 ? `（${i + 1}/${total}）` : '';
+    const body = chunks[i] + (label ? '\n' + label : '');
+    await Promise.race([
+      bot.sendMessage(body),
+      new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('chunk send timeout 15s')), 15000); t.unref?.(); }),
+    ]);
+    flog(`chunk ${i + 1}/${total} delivered (${chunks[i].length} chars)`);
+    if (i < total - 1) await new Promise((r) => { const t = setTimeout(r, 400); t.unref?.(); });
+  }
+}
+
 /** Load weixin-agent-sdk from well-known locations. */
 function loadSdk() {
   const candidates = [
@@ -180,7 +220,20 @@ function requestChat(conversationId, text) {
 
       if (!text.trim()) return { text: '' };
       const reply = await requestChat(conv, text);
-      return { text: mdToPlain(reply.text || '') };
+      const plain = mdToPlain(reply.text || '');
+      // Long answers go out as sequential sendMessage chunks (ordering fully
+      // under our control); the SDK reply path stays empty in that case.
+      if (plain.length > 2000) {
+        if (!bot) return { text: plain.slice(0, 2000) };
+        try {
+          await sendChunked(splitChunks(plain, 1800));
+          return { text: '' };
+        } catch (e) {
+          flog('chunked delivery FAILED: ' + ((e && e.message) || e));
+          return { text: plain.slice(0, 3500) + '\n\n[发送中断，内容可能不完整]' };
+        }
+      }
+      return { text: plain };
     },
     async clearSession() {},
   };

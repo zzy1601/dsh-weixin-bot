@@ -4,3 +4,5 @@ node_modules/
 .dsh-weixin-bot-worker.js
 worker.b64.txt
 config.json
+wxbot-state.json
+*.tmp
