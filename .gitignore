@@ -3,3 +3,4 @@ node_modules/
 .wx-worker.log
 .dsh-weixin-bot-worker.js
 worker.b64.txt
+config.json
