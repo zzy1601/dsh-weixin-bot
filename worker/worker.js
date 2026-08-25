@@ -121,13 +121,21 @@ let nextId = 1;
 /** Bot instance from sdk.start() — undefined until the monitor is up. */
 let bot;
 
+/** Send one workspace file back to WeChat via CDN upload. */
+async function sendFileMessage(filePath, fileName) {
+  await Promise.race([
+    bot.sendMessage({ media: { type: 'file', url: filePath, fileName: fileName || undefined } }),
+    new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('file send timeout 30s')), 30000); t.unref?.(); }),
+  ]);
+}
+
 /** Ask the plugin (native DSH Agent) to handle one chat turn. */
 const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
-function requestChat(conversationId, text) {
+function requestChat(conversationId, text, media) {
   const id = `m${nextId++}`;
   return new Promise((resolve) => {
     pendingReplies.set(id, resolve);
-    send({ type: 'chat', id, conversationId, text });
+    send({ type: 'chat', id, conversationId, text, media });
     setTimeout(() => {
       if (pendingReplies.has(id)) {
         pendingReplies.delete(id);
@@ -150,7 +158,7 @@ function requestChat(conversationId, text) {
     try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'reply') {
       const r = pendingReplies.get(msg.id);
-      if (r) { pendingReplies.delete(msg.id); flog('<< reply for ' + msg.id + ': ' + String(msg.text || '').slice(0, 200)); r({ text: msg.text ?? '' }); return; }
+      if (r) { pendingReplies.delete(msg.id); flog('<< reply for ' + msg.id + ': ' + String(msg.text || '').slice(0, 200)); r({ text: msg.text ?? '', files: Array.isArray(msg.files) ? msg.files : [] }); return; }
       // Late result: the requester already timed out, but the work finished —
       // deliver it proactively instead of dropping hours of agent effort.
       const text = String(msg.text ?? '').slice(0, 3500);
@@ -194,7 +202,7 @@ function requestChat(conversationId, text) {
     async chat(request) {
       const conv = String((request && request.conversationId) || 'default');
       const text = String((request && request.text) ?? '');
-      flog(`chat() conv=${conv} text=${text.slice(0, 160)}`);
+      flog(`chat() conv=${conv} text=${text.slice(0, 160)} media=${request?.media ? request.media.filePath : 'none'}`);
 
       // Owner allowlist: first sender auto-pairs as owner; others rejected.
       if (!cfg.owners.includes(conv)) {
@@ -218,8 +226,37 @@ function requestChat(conversationId, text) {
       }
       recent.push({ t: now, conv, text });
 
-      if (!text.trim()) return { text: '' };
-      const reply = await requestChat(conv, text);
+      if (!text.trim() && !request?.media) return { text: '' };
+
+      // Inbound attachments: the SDK has already downloaded & decrypted them;
+      // forward the local paths so the host can list them for the agent.
+      let media = [];
+      if (request && request.media && request.media.filePath) {
+        media = [{
+          filePath: String(request.media.filePath),
+          fileName: String(request.media.fileName || ''),
+          mimeType: String(request.media.mimeType || ''),
+          type: String(request.media.type || ''),
+        }];
+      }
+
+      const reply = await requestChat(conv, text, media);
+
+      // Outbound files requested by the model ([[send-file:path]] directives,
+      // resolved to existing absolute paths host-side) go out before the text.
+      if (Array.isArray(reply.files)) {
+        for (const f of reply.files) {
+          const p = typeof f === 'string' ? f : (f && f.path) || '';
+          if (!p || !bot) continue;
+          try {
+            await sendFileMessage(p);
+            flog('file delivered: ' + p);
+          } catch (e) {
+            flog('file send FAILED (' + p + '): ' + ((e && e.message) || e));
+          }
+        }
+      }
+
       const plain = mdToPlain(reply.text || '');
       // Long answers go out as sequential sendMessage chunks (ordering fully
       // under our control); the SDK reply path stays empty in that case.

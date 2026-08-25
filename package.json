@@ -1,6 +1,6 @@
 {
   "name": "dsh-weixin-bot",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "DSH WeChat ClawBot bridge plugin: chat with a native DeepSeek Harness agent from WeChat (multi-turn context, per-chat parallel queues, live thinking/tool progress with excerpts)",
   "main": "lib/index.mjs",
   "bin": {

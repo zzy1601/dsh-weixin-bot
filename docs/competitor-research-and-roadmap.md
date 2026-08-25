@@ -51,14 +51,20 @@
    实际影响有限——所有主动推送都跟随一条真实来消息（token 在此时已缓存）。仅当未来自研
    协议客户端时重新评估。
 
-### v0.6.0 —— 能力扩展（待实施）
+### v0.6.0 —— 能力扩展（✅ 已实现）
 
-4. **outbound 文件回传**：Agent 产出文件（交付物/生成物）时经 `ChatResponse.media` 回传微信；
-   先支持单文件，路径取自 turn 内 tool 结果里的绝对路径启发式识别。
-5. **inbound 图片透传**：`ChatRequest.media`（图片）转存后以附件形式注入 Agent 消息。
-6. **cordis Schema 配置化**：cwd / provider / model / 各节流参数 / owner 列表迁移到 Config schema，
-   兼容现有 config.json 自动迁移。
-7. **/stop 取消**：接入 Agent 的中止信号，终止当前轮次并回复"已停止"。
+4. ✅ **outbound 文件回传**：采用 xiaoshihou514 的指令模式而非启发式——compose 时注入
+   weixin:delivery 提示区块教会模型 `[[send-file:absolute/path]]` 指令；host 解析最终回复、
+   校验文件存在性（缺失自动跳过并记日志）、剥离指令行后交 worker 经 `ChatResponse.media`
+   CDN 上传。每条回复上限 3 个文件。
+5. ✅ **inbound 图片/文件透传**：SDK 已下载解密的本地路径以清单形式注入用户消息正文，
+   Agent 用自己的文件工具按绝对路径读取——与"人类同事递文件"的心智一致。
+6. ✅ **配置化**：apply 接收 config 对象（cordis patch 可覆盖 cwd/provider/model/
+   turnCapMinutes/maxFilesPerReply），env 变量作次级兜底。未用 Schema 类的原因：
+   file:// 直载插件解析不了 @deepseek-ai/schemastery 依赖（保持宿主零外部依赖）。
+7. ✅ **/stop 取消**：`agent.cancel({kind:'user'})`，且绕过会话队列立即送达运行中的轮次。
+
+### v0.7.0 —— 群聊与工程质量
 
 ### v0.7.0 —— 群聊与工程质量
 
