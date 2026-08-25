@@ -82,6 +82,7 @@ let nextId = 1;
 let bot;
 
 /** Ask the plugin (native DSH Agent) to handle one chat turn. */
+const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 function requestChat(conversationId, text) {
   const id = `m${nextId++}`;
   return new Promise((resolve) => {
@@ -90,9 +91,9 @@ function requestChat(conversationId, text) {
     setTimeout(() => {
       if (pendingReplies.has(id)) {
         pendingReplies.delete(id);
-        resolve({ text: '[timeout] DSH 5 minutes no response' });
+        resolve({ text: '[timeout] 任务超过 15 分钟仍未完成，已停止等待；稍后若完成会单独补发结果。' });
       }
-    }, 5 * 60 * 1000).unref?.();
+    }, REQUEST_TIMEOUT_MS).unref?.();
   });
 }
 
@@ -109,7 +110,20 @@ function requestChat(conversationId, text) {
     try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'reply') {
       const r = pendingReplies.get(msg.id);
-      if (r) { pendingReplies.delete(msg.id); flog('<< reply for ' + msg.id + ': ' + String(msg.text || '').slice(0, 200)); r({ text: msg.text ?? '' }); }
+      if (r) { pendingReplies.delete(msg.id); flog('<< reply for ' + msg.id + ': ' + String(msg.text || '').slice(0, 200)); r({ text: msg.text ?? '' }); return; }
+      // Late result: the requester already timed out, but the work finished —
+      // deliver it proactively instead of dropping hours of agent effort.
+      const text = String(msg.text ?? '').slice(0, 3500);
+      if (!text || !bot) return;
+      flog('<< late reply for ' + msg.id + ', pushing via sendMessage');
+      Promise.race([
+        bot.sendMessage(mdToPlain(text)),
+        new Promise((_, rej) => { const t = setTimeout(() => rej(new Error('sendMessage timeout 15s')), 15000); t.unref?.(); }),
+      ]).then(
+        () => flog('late reply delivered ok'),
+        (e) => flog('late reply send FAILED: ' + ((e && e.message) || e))
+      );
+      return;
     } else if (msg.type === 'status') {
       // Proactive mid-task progress push; sendMessage needs a cached context
       // token, which exists because a status only follows an inbound message.
