@@ -1,0 +1,7 @@
+# dsh-weixin-bot — Host plugin patch layer
+# 把微信桥接插件插入 DSH 加载树。config 留空 = 全部走内置默认值，
+# 可在 cordis patch config 里覆盖（cwd / model / reportSessionId 等）。
+- insert:
+    - id: weixin-bot
+      name: dsh-weixin-bot
+      config: {}
